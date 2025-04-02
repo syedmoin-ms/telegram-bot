@@ -48,8 +48,6 @@ async def admin_panel(update: Update, context: CallbackContext):
             return
 
         current_time = datetime.datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')
-        user_login = "syedmoin-ms"
-
         total_users = len(users)
         total_points = sum(user["points"] for user in users.values())
         total_referrals = sum(user["referrals"] for user in users.values())
@@ -57,19 +55,19 @@ async def admin_panel(update: Update, context: CallbackContext):
 
         message = (
             f"Current Date and Time (UTC - YYYY-MM-DD HH:MM:SS formatted): {current_time}\n"
-            f"Current User's Login: {user_login}\n\n"
+            "Current User's Login: syedmoin-ms\n\n"
             "👨‍💼 Admin Panel Statistics:\n\n"
             f"📊 Total Users: {total_users}\n"
             f"💰 Total Points: {total_points}\n"
             f"👥 Total Referrals: {total_referrals}\n"
             f"🎁 Total Rewards Claimed: {total_rewards}\n\n"
             "Admin Commands:\n"
-            "/broadcast - Send message to all users\n"
-            "/points - Modify user points\n"
-            "/ban - Ban a user\n"
-            "/unban - Unban a user\n"
-            "/stats - View user statistics\n"
-            "/send <user_id> <message> - Send message to specific user"
+            "📢 /broadcast - Send message to all users\n"
+            "💰 /points <user_id> <points> - Modify user points\n"
+            "🚫 /ban <user_id> - Ban a user\n"
+            "✅ /unban <user_id> - Unban a user\n"
+            "📊 /stats <user_id> - View user statistics\n"
+            "📨 /send <user_id> <message> - Send message to specific user"
         )
         await update.message.reply_text(message)
     except Exception as e:
@@ -79,12 +77,15 @@ async def admin_panel(update: Update, context: CallbackContext):
 async def send_user_message(update: Update, context: CallbackContext):
     try:
         user_id = str(update.effective_user.id)
-        if not await is_admin(user_id):
+        if user_id != str(ADMIN_ID):
             await update.message.reply_text("❌ You are not authorized to use admin commands.")
             return
 
         if len(context.args) < 2:
-            await update.message.reply_text("Usage: /send <user_id> <message>")
+            await update.message.reply_text(
+                "Usage: /send <user_id> <message>\n\n"
+                "Example: /send 123456789 Hello, how are you?"
+            )
             return
 
         target_id = context.args[0]
@@ -95,10 +96,19 @@ async def send_user_message(update: Update, context: CallbackContext):
                 chat_id=target_id,
                 text=f"📬 Message from Admin:\n\n{message}"
             )
-            await update.message.reply_text(f"✅ Message sent to user {target_id}")
+            await update.message.reply_text(
+                f"✅ Message sent successfully!\n"
+                f"To: {target_id}\n"
+                f"Message: {message}"
+            )
+            
+            # Log the message
+            logger.info(f"Admin message sent to {target_id}: {message}")
         except Exception as e:
-            await update.message.reply_text(f"❌ Failed to send message to user {target_id}")
-            logger.error(f"Error sending message to user {target_id}: {str(e)}")
+            await update.message.reply_text(
+                f"❌ Failed to send message to user {target_id}\n"
+                f"Error: {str(e)}"
+            )
 
     except Exception as e:
         logger.error(f"Error in send_user_message: {str(e)}")
