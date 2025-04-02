@@ -20,7 +20,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # 🔹 Bot Token & Channel Details
-TOKEN = "1708811576:AAH83NPPqGkdswHHmK7QC6JxOkwsjIhhu6U"
+TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 REQUIRED_CHANNELS = ["@fampayearningapp", "@grassnodepayairdrop"]
 CHANNEL_LINKS = {
     "@fampayearningapp": "https://t.me/fampayearningapp",
