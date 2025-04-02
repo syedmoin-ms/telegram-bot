@@ -8,6 +8,9 @@ import traceback
 from telegram import Update, ReplyKeyboardMarkup, KeyboardButton, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes, CallbackContext
 
+async def is_admin(user_id: str) -> bool:
+    return str(user_id) == str(ADMIN_ID)
+
 # Set up logging
 logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
@@ -41,16 +44,21 @@ if not os.path.exists(DATA_DIR):
     os.makedirs(DATA_DIR)
 
 async def admin_panel(update: Update, context: CallbackContext):
+    """Admin panel command handler"""
     try:
         user_id = str(update.effective_user.id)
-        if user_id != str(ADMIN_ID):  # Using your admin ID
+        if not await is_admin(user_id):
+            logger.warning(f"Unauthorized admin panel access attempt by user {user_id}")
             await update.message.reply_text("❌ You are not authorized to use admin commands.")
             return
 
+        logger.info(f"Admin panel accessed by {user_id}")
         current_time = datetime.datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')
+
+        # Calculate statistics
         total_users = len(users)
-        total_points = sum(user["points"] for user in users.values())
-        total_referrals = sum(user["referrals"] for user in users.values())
+        total_points = sum(user.get("points", 0) for user in users.values())
+        total_referrals = sum(user.get("referrals", 0) for user in users.values())
         total_rewards = sum(user.get("rewards_claimed", 0) for user in users.values())
 
         message = (
@@ -69,15 +77,22 @@ async def admin_panel(update: Update, context: CallbackContext):
             "📊 /stats <user_id> - View user statistics\n"
             "📨 /send <user_id> <message> - Send message to specific user"
         )
+        
         await update.message.reply_text(message)
+        logger.info("Admin panel displayed successfully")
+        
     except Exception as e:
         logger.error(f"Error in admin panel: {str(e)}")
-        await update.message.reply_text("❌ An error occurred.")
+        await update.message.reply_text(
+            "❌ An error occurred while displaying the admin panel.\n"
+            "Please try again or contact support."
+        )
 
 async def send_user_message(update: Update, context: CallbackContext):
+    """Send message to specific user"""
     try:
         user_id = str(update.effective_user.id)
-        if user_id != str(ADMIN_ID):
+        if not await is_admin(user_id):
             await update.message.reply_text("❌ You are not authorized to use admin commands.")
             return
 
@@ -102,7 +117,6 @@ async def send_user_message(update: Update, context: CallbackContext):
                 f"Message: {message}"
             )
             
-            # Log the message
             logger.info(f"Admin message sent to {target_id}: {message}")
         except Exception as e:
             await update.message.reply_text(
@@ -560,6 +574,15 @@ def main():
         app.add_handler(CommandHandler("start", start))
         app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
         app.add_handler(CommandHandler("help", help_command))
+        
+        # Add admin command handlers
+        app.add_handler(CommandHandler("admin", admin_panel))
+        app.add_handler(CommandHandler("broadcast", broadcast_message))
+        app.add_handler(CommandHandler("ban", ban_user))
+        app.add_handler(CommandHandler("unban", unban_user))
+        app.add_handler(CommandHandler("points", edit_points))
+        app.add_handler(CommandHandler("stats", user_stats))
+        app.add_handler(CommandHandler("send", send_user_message))
 
         # Add error handler
         app.add_error_handler(error_handler)
@@ -572,6 +595,7 @@ def main():
         logger.error(f"Error in main: {str(e)}")
         traceback.print_exc()
         raise e
+
 
 if __name__ == "__main__":
     main()
