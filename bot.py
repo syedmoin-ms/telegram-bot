@@ -39,6 +39,34 @@ DATA_FILE = f"{DATA_DIR}/users.json"
 if not os.path.exists(DATA_DIR):
     os.makedirs(DATA_DIR)
 
+async def help_command(update: Update, context: CallbackContext):
+    try:
+        await update.message.reply_text(
+            "ℹ️ Bot Help:\n\n"
+            "1. Join our channels to start earning\n"
+            "2. Share your referral link with friends\n"
+            "3. Earn points through referrals\n"
+            "4. Claim daily rewards\n"
+            "5. Complete tasks for extra points\n"
+            "6. Claim rewards at 100 points\n\n"
+            "📌 Points System:\n"
+            "• Referral Bonus (You): +10 points\n"
+            "• Referral Bonus (Friend): +5 points\n"
+            "• Daily Reward: +5 points\n"
+            "• Task Completion: +15 points\n\n"
+            "💰 Rewards:\n"
+            "• 100 points = 1 Reward claim\n\n"
+            "🔥 How to earn more:\n"
+            "• Share your referral link\n"
+            "• Complete daily check-in\n"
+            "• Participate in tasks\n"
+            "• Stay active in channels\n\n"
+            "For support: @admin"
+        )
+    except Exception as e:
+        logger.error(f"Error in help_command: {str(e)}")
+        await update.message.reply_text("❌ An error occurred. Please try again.")
+
 # Initialize users dictionary
 def load_data():
     global users
@@ -362,6 +390,113 @@ async def user_stats(update: Update, context: CallbackContext):
            f"🚫 Banned Users: {banned_users}"
 
     await update.message.reply_text(stats)
+
+async def my_points(update: Update, context: CallbackContext):
+    try:
+        user_id = str(update.effective_user.id)
+        user_data = users.get(user_id, {"points": 0, "referrals": 0})
+        
+        message = (
+            "💰 Your Account Status:\n\n"
+            f"• Points Balance: {user_data['points']}\n"
+            f"• Total Referrals: {user_data['referrals']}\n"
+            f"• Rewards Claimed: {user_data.get('rewards_claimed', 0)}\n\n"
+            "🎯 Need more points?\n"
+            "• Share your referral link\n"
+            "• Complete daily check-in\n"
+            "• Participate in tasks"
+        )
+        
+        await update.message.reply_text(message)
+    except Exception as e:
+        logger.error(f"Error in my_points: {str(e)}")
+        await update.message.reply_text("❌ An error occurred. Please try again.")
+
+async def claim_reward(update: Update, context: CallbackContext):
+    try:
+        user_id = str(update.effective_user.id)
+        user_data = users.get(user_id, {"points": 0})
+
+        if user_data["points"] < 100:
+            await update.message.reply_text(
+                "❌ You need at least 100 points to claim a reward!\n"
+                f"Current points: {user_data['points']}\n"
+                f"Points needed: {100 - user_data['points']}"
+            )
+            return
+
+        if not user_data.get("awaiting_email", False):
+            users[user_id]["awaiting_email"] = True
+            save_data()
+            await update.message.reply_text(
+                "🎁 Great! To claim your reward, please enter your Gmail address:"
+            )
+            return
+
+        email = update.message.text
+        if not is_valid_email(email):
+            await update.message.reply_text(
+                "❌ Invalid email format! Please enter a valid Gmail address."
+            )
+            return
+
+        users[user_id]["points"] -= 100
+        users[user_id]["email"] = email
+        users[user_id]["awaiting_email"] = False
+        users[user_id]["rewards_claimed"] = users[user_id].get("rewards_claimed", 0) + 1
+        save_data()
+
+        user_name = update.effective_user.first_name
+        user_link = f"[{user_name}](tg://user?id={user_id})"
+
+        # Notify admin
+        admin_message = (
+            f"🎁 New Reward Claim!\n\n"
+            f"User: {user_link}\n"
+            f"Email: {email}\n"
+            f"Total Claims: {users[user_id]['rewards_claimed']}\n"
+            f"Remaining Points: {users[user_id]['points']}"
+        )
+
+        try:
+            await context.bot.send_message(
+                chat_id=ADMIN_ID,
+                text=admin_message,
+                parse_mode='Markdown'
+            )
+        except Exception as e:
+            logger.error(f"Failed to notify admin: {str(e)}")
+
+        await update.message.reply_text(
+            "✅ Reward claimed successfully!\n"
+            f"Remaining points: {users[user_id]['points']}\n"
+            "An admin will contact you soon."
+        )
+
+    except Exception as e:
+        logger.error(f"Error in claim_reward: {str(e)}")
+        await update.message.reply_text("❌ An error occurred. Please try again.")
+
+async def leaderboard(update: Update, context: CallbackContext):
+    try:
+        sorted_users = sorted(users.items(), key=lambda x: x[1]['referrals'], reverse=True)
+        message = "🏆 Top Referrers:\n\n"
+        
+        for i, (user_id, data) in enumerate(sorted_users[:10], 1):
+            try:
+                user = await context.bot.get_chat(user_id)
+                name = user.first_name
+            except:
+                name = f"User{user_id[:4]}"
+            message += f"{i}. {name}: {data['referrals']} referrals | {data['points']} points\n"
+
+        if len(sorted_users) == 0:
+            message += "No users yet!"
+
+        await update.message.reply_text(message)
+    except Exception as e:
+        logger.error(f"Error in leaderboard: {str(e)}")
+        await update.message.reply_text("❌ An error occurred. Please try again.")
 
 # Rest of your existing functions (my_points, claim_reward, leaderboard, help_command)
 # ... (keep them as they were)
