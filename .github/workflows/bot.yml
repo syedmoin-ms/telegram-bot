@@ -2,8 +2,8 @@ name: Run Telegram Bot
 
 on:
   schedule:
-    - cron: '*/5 * * * *'  # Runs every 5 minutes
-  workflow_dispatch:  # Allows manual trigger
+    - cron: '*/5 * * * *'
+  workflow_dispatch:
 
 jobs:
   run-bot:
@@ -29,11 +29,20 @@ jobs:
       run: |
         echo "Python version:"
         python --version
-        echo "Checking for token (safely):"
-        if [ -n "$TELEGRAM_BOT_TOKEN" ]; then
-          echo "Token is set"
+        echo "Current directory:"
+        pwd
+        echo "Directory contents:"
+        ls -la
+        echo "Environment variables (safely):"
+        env | grep -v "TOKEN"
+      
+    - name: Verify Token
+      run: |
+        if [ -z "$TELEGRAM_BOT_TOKEN" ]; then
+          echo "Error: TELEGRAM_BOT_TOKEN is not set"
+          exit 1
         else
-          echo "Token is NOT set"
+          echo "TELEGRAM_BOT_TOKEN is set (length: ${#TELEGRAM_BOT_TOKEN})"
         fi
       env:
         TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
@@ -42,11 +51,3 @@ jobs:
       env:
         TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
       run: python bot.py
-
-    # Optional: Save data as artifact
-    - uses: actions/upload-artifact@main
-      if: always()
-      with:
-        name: bot-data
-        path: data/
-        retention-days: 1
