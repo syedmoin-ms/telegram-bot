@@ -43,6 +43,198 @@ DATA_FILE = f"{DATA_DIR}/users.json"
 if not os.path.exists(DATA_DIR):
     os.makedirs(DATA_DIR)
 
+# Add these admin functions before the main() function:
+
+async def broadcast_message(update: Update, context: CallbackContext):
+    """Send broadcast message to all users"""
+    try:
+        user_id = str(update.effective_user.id)
+        if not await is_admin(user_id):
+            await update.message.reply_text("❌ You are not authorized to use admin commands.")
+            return
+
+        if not context.args:
+            await update.message.reply_text(
+                "Usage: /broadcast <message>\n\n"
+                "Example: /broadcast Hello everyone!"
+            )
+            return
+
+        message = " ".join(context.args)
+        success = 0
+        failed = 0
+
+        for user_id in users:
+            try:
+                await context.bot.send_message(
+                    chat_id=user_id,
+                    text=f"📢 Broadcast Message:\n\n{message}"
+                )
+                success += 1
+            except Exception:
+                failed += 1
+
+        await update.message.reply_text(
+            f"✅ Broadcast completed!\n"
+            f"• Sent successfully: {success}\n"
+            f"• Failed: {failed}"
+        )
+        logger.info(f"Broadcast message sent by admin. Success: {success}, Failed: {failed}")
+
+    except Exception as e:
+        logger.error(f"Error in broadcast: {str(e)}")
+        await update.message.reply_text("❌ An error occurred while broadcasting.")
+
+async def ban_user(update: Update, context: CallbackContext):
+    """Ban a user from using the bot"""
+    try:
+        user_id = str(update.effective_user.id)
+        if not await is_admin(user_id):
+            await update.message.reply_text("❌ You are not authorized to use admin commands.")
+            return
+
+        if not context.args:
+            await update.message.reply_text("Usage: /ban <user_id>")
+            return
+
+        target_id = str(context.args[0])
+        if target_id not in users:
+            await update.message.reply_text("❌ User not found.")
+            return
+
+        users[target_id]["banned"] = True
+        save_data()
+
+        await update.message.reply_text(f"✅ User {target_id} has been banned.")
+        
+        try:
+            await context.bot.send_message(
+                chat_id=target_id,
+                text="❌ You have been banned from using this bot."
+            )
+        except Exception:
+            pass
+            
+    except Exception as e:
+        logger.error(f"Error in ban_user: {str(e)}")
+        await update.message.reply_text("❌ An error occurred.")
+
+async def unban_user(update: Update, context: CallbackContext):
+    """Unban a user"""
+    try:
+        user_id = str(update.effective_user.id)
+        if not await is_admin(user_id):
+            await update.message.reply_text("❌ You are not authorized to use admin commands.")
+            return
+
+        if not context.args:
+            await update.message.reply_text("Usage: /unban <user_id>")
+            return
+
+        target_id = str(context.args[0])
+        if target_id not in users:
+            await update.message.reply_text("❌ User not found.")
+            return
+
+        users[target_id]["banned"] = False
+        save_data()
+
+        await update.message.reply_text(f"✅ User {target_id} has been unbanned.")
+        
+        try:
+            await context.bot.send_message(
+                chat_id=target_id,
+                text="✅ You have been unbanned. You can use the bot again."
+            )
+        except Exception:
+            pass
+            
+    except Exception as e:
+        logger.error(f"Error in unban_user: {str(e)}")
+        await update.message.reply_text("❌ An error occurred.")
+
+async def edit_points(update: Update, context: CallbackContext):
+    """Modify user points"""
+    try:
+        user_id = str(update.effective_user.id)
+        if not await is_admin(user_id):
+            await update.message.reply_text("❌ You are not authorized to use admin commands.")
+            return
+
+        if len(context.args) != 2:
+            await update.message.reply_text(
+                "Usage: /points <user_id> <points>\n\n"
+                "Example: /points 123456789 100"
+            )
+            return
+
+        target_id = str(context.args[0])
+        points = int(context.args[1])
+
+        if target_id not in users:
+            await update.message.reply_text("❌ User not found.")
+            return
+
+        users[target_id]["points"] = points
+        save_data()
+
+        await update.message.reply_text(
+            f"✅ Points updated!\n"
+            f"User: {target_id}\n"
+            f"New points: {points}"
+        )
+        logger.info(f"Points modified for user {target_id}: {points}")
+
+    except ValueError:
+        await update.message.reply_text("❌ Invalid points value. Please enter a number.")
+    except Exception as e:
+        logger.error(f"Error in edit_points: {str(e)}")
+        await update.message.reply_text("❌ An error occurred.")
+
+async def user_stats(update: Update, context: CallbackContext):
+    """View user statistics"""
+    try:
+        user_id = str(update.effective_user.id)
+        if not await is_admin(user_id):
+            await update.message.reply_text("❌ You are not authorized to use admin commands.")
+            return
+
+        if not context.args:
+            await update.message.reply_text(
+                "Usage: /stats <user_id>\n\n"
+                "Example: /stats 123456789"
+            )
+            return
+
+        target_id = str(context.args[0])
+        if target_id not in users:
+            await update.message.reply_text("❌ User not found.")
+            return
+
+        user_data = users[target_id]
+        try:
+            user = await context.bot.get_chat(target_id)
+            user_name = user.first_name
+        except:
+            user_name = f"User{target_id[:4]}"
+
+        message = (
+            f"📊 Stats for {user_name}\n\n"
+            f"User ID: {target_id}\n"
+            f"Points: {user_data.get('points', 0)}\n"
+            f"Referrals: {user_data.get('referrals', 0)}\n"
+            f"Rewards Claimed: {user_data.get('rewards_claimed', 0)}\n"
+            f"Join Date: {user_data.get('join_date', 'Unknown')}\n"
+            f"Last Daily Claim: {user_data.get('last_daily_claim', 'Never')}\n"
+            f"Email: {user_data.get('email', 'Not set')}\n"
+            f"Banned: {user_data.get('banned', False)}"
+        )
+        await update.message.reply_text(message)
+        
+    except Exception as e:
+        logger.error(f"Error in user_stats: {str(e)}")
+        await update.message.reply_text("❌ An error occurred.")
+
 async def admin_panel(update: Update, context: CallbackContext):
     """Admin panel command handler"""
     try:
