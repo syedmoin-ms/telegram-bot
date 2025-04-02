@@ -24,6 +24,7 @@ else:
     logger.info(f"Token found with length: {len(TOKEN)}")
     logger.info(f"Token starts with: {TOKEN[:4]}...")
 
+# Channel and admin configuration
 REQUIRED_CHANNELS = ["@fampayearningapp", "@grassnodepayairdrop"]
 CHANNEL_LINKS = {
     "@fampayearningapp": "https://t.me/fampayearningapp",
@@ -68,6 +69,7 @@ def save_data():
         # Save new data
         with open(DATA_FILE, "w") as f:
             json.dump(users, f, indent=4)
+        logger.info("Data saved successfully")
     except Exception as e:
         logger.error(f"Error saving data: {str(e)}")
 
@@ -75,10 +77,14 @@ def is_valid_email(email):
     pattern = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
     return re.match(pattern, email) is not None
 
+def get_current_time():
+    """Get current UTC time in YYYY-MM-DD HH:MM:SS format"""
+    return datetime.datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')
+
 async def check_daily_reward(update: Update, context: CallbackContext):
     try:
         user_id = str(update.effective_user.id)
-        today = str(datetime.date.today())
+        current_date = datetime.datetime.utcnow().strftime('%Y-%m-%d')
 
         if user_id not in users:
             users[user_id] = {
@@ -90,14 +96,23 @@ async def check_daily_reward(update: Update, context: CallbackContext):
                 "awaiting_email": False
             }
 
-        if users[user_id]["last_daily_claim"] != today:
+        if users[user_id].get("last_daily_claim", "") != current_date:
             reward_points = 5
             users[user_id]["points"] = users[user_id].get("points", 0) + reward_points
-            users[user_id]["last_daily_claim"] = today
+            users[user_id]["last_daily_claim"] = current_date
             save_data()
-            await update.message.reply_text(f"🎁 Daily Reward Claimed!\n+{reward_points} points!")
+            await update.message.reply_text(
+                f"🎁 Daily Reward Claimed!\n"
+                f"+{reward_points} points!\n"
+                f"Current balance: {users[user_id]['points']} points\n"
+                f"Come back tomorrow for more rewards!"
+            )
         else:
-            await update.message.reply_text("❌ You've already claimed your daily reward today.\nCome back tomorrow!")
+            next_claim = (datetime.datetime.strptime(current_date, '%Y-%m-%d') + datetime.timedelta(days=1)).strftime('%Y-%m-%d')
+            await update.message.reply_text(
+                "❌ You've already claimed your daily reward today.\n"
+                f"Next reward available on: {next_claim} UTC"
+            )
     except Exception as e:
         logger.error(f"Error in daily reward: {str(e)}")
         await update.message.reply_text("❌ An error occurred while claiming daily reward.")
@@ -140,9 +155,10 @@ async def start(update: Update, context: CallbackContext):
                 "email": "",
                 "rewards_claimed": 0,
                 "awaiting_email": False,
-                "referral_clicks": 0,
+                "has_been_referred": False,
                 "referrer_id": None,
-                "last_daily_claim": ""
+                "last_daily_claim": "",
+                "join_date": get_current_time()
             }
             save_data()
 
@@ -151,59 +167,42 @@ async def start(update: Update, context: CallbackContext):
             referrer_id = str(context.args[0])
             logger.info(f"Referral attempt - User: {user_id}, Referrer: {referrer_id}")
             
+            # Check if referrer exists and is not the same as user
             if referrer_id in users and referrer_id != user_id:
-                try:
-                    if "referral_clicks" not in users[user_id]:
-                        users[user_id]["referral_clicks"] = 1
-                        users[user_id]["referrer_id"] = referrer_id
-                        save_data()
-                        await update.message.reply_text(
-                            "🔄 First click registered! Please click the referral link again to confirm."
+                # Check if user has already been referred
+                if not users[user_id].get("has_been_referred", False):
+                    # Update new user's data
+                    users[user_id]["points"] = users[user_id].get("points", 0) + 5
+                    users[user_id]["has_been_referred"] = True
+                    users[user_id]["referrer_id"] = referrer_id
+
+                    # Update referrer's data
+                    users[referrer_id]["points"] = users[referrer_id].get("points", 0) + 10
+                    users[referrer_id]["referrals"] = users[referrer_id].get("referrals", 0) + 1
+
+                    save_data()
+
+                    # Send confirmation to new user
+                    await update.message.reply_text(
+                        f"🎉 Congratulations!\n\n"
+                        f"You've earned: +5 points 🎁\n"
+                        f"Current balance: {users[user_id]['points']} points\n\n"
+                        f"Start earning more by sharing your referral link! 🔗"
+                    )
+
+                    # Send confirmation to referrer
+                    try:
+                        await context.bot.send_message(
+                            chat_id=referrer_id,
+                            text=f"🎉 New Referral Success!\n\n"
+                                f"User: {user_name}\n"
+                                f"You earned: +10 points 🎁\n"
+                                f"Total referrals: {users[referrer_id]['referrals']}\n"
+                                f"Current balance: {users[referrer_id]['points']} points"
                         )
-                    elif users[user_id]["referral_clicks"] == 1 and users[user_id].get("referrer_id") == referrer_id:
-                        users[user_id]["points"] = users[user_id].get("points", 0) + 5
-                        users[user_id]["referral_clicks"] = 2
-
-                        if referrer_id not in users:
-                            users[referrer_id] = {
-                                "points": 10,
-                                "referrals": 1,
-                                "email": "",
-                                "rewards_claimed": 0
-                            }
-                        else:
-                            users[referrer_id]["points"] = users[referrer_id].get("points", 0) + 10
-                            users[referrer_id]["referrals"] = users[referrer_id].get("referrals", 0) + 1
-
-                        save_data()
-
-                        try:
-                            referrer = await context.bot.get_chat(referrer_id)
-                            referrer_name = referrer.first_name
-                        except Exception as e:
-                            logger.error(f"Could not get referrer name: {e}")
-                            referrer_name = "your referrer"
-
-                        await update.message.reply_text(
-                            f"🎉 Congratulations! You've been referred by {referrer_name}!\n\n"
-                            f"You received: +5 points 🎁\n"
-                            f"Current balance: {users[user_id]['points']} points\n\n"
-                            f"Start earning by sharing your referral link! 🔗"
-                        )
-
-                        try:
-                            await context.bot.send_message(
-                                chat_id=referrer_id,
-                                text=f"🎉 Congratulations! New Referral Success!\n\n"
-                                    f"User: {user_name}\n"
-                                    f"You received: +10 points 🎁\n"
-                                    f"Total referrals: {users[referrer_id]['referrals']}\n"
-                                    f"Current balance: {users[referrer_id]['points']} points"
-                            )
-                        except Exception as e:
-                            logger.error(f"Could not send message to referrer: {e}")
-                except Exception as e:
-                    logger.error(f"Error processing referral: {e}")
+                        logger.info(f"Referral success - Referrer: {referrer_id}, User: {user_id}")
+                    except Exception as e:
+                        logger.error(f"Could not send message to referrer: {e}")
 
         # Create keyboard with main options
         keyboard = [
@@ -214,10 +213,11 @@ async def start(update: Update, context: CallbackContext):
         ]
         reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
 
+        # Show welcome message
         await update.message.reply_text(
             f"👋 Welcome {user_name}!\n\n"
             f"📊 Points: {users[user_id]['points']}\n"
-            f"👥 Referrals: {users[user_id]['referrals']}\n\n"
+            f"👥 Referrals: {users[user_id].get('referrals', 0)}\n\n"
             "Choose an option from the menu below:",
             reply_markup=reply_markup
         )
@@ -233,10 +233,25 @@ async def refer_earn(update: Update, context: CallbackContext):
         user_id = str(update.effective_user.id)
         bot = await context.bot.get_me()
         referral_link = f"https://t.me/{bot.username}?start={user_id}"
-        await update.message.reply_text(
-            f"🔗 Your referral link:\n{referral_link}\n\n"
-            "Share this link with your friends. You'll get points when they join!"
+        
+        user_data = users.get(user_id, {})
+        referrals_count = user_data.get('referrals', 0)
+        total_earnings = user_data.get('points', 0)
+        
+        message = (
+            "🔥 Refer & Earn Program:\n\n"
+            "Earn points by inviting friends:\n"
+            "• You get: 10 points per referral\n"
+            "• Friend gets: 5 points for joining\n\n"
+            f"Your Stats:\n"
+            f"• Total Referrals: {referrals_count}\n"
+            f"• Total Points: {total_earnings}\n\n"
+            f"Your Referral Link:\n{referral_link}\n\n"
+            "Share this link with your friends to earn points! 🎁"
         )
+        
+        await update.message.reply_text(message)
+        
     except Exception as e:
         logger.error(f"Error in refer_earn: {str(e)}")
         await update.message.reply_text("❌ An error occurred. Please try again.")
@@ -245,10 +260,20 @@ async def my_points(update: Update, context: CallbackContext):
     try:
         user_id = str(update.effective_user.id)
         user_data = users.get(user_id, {"points": 0, "referrals": 0})
-        await update.message.reply_text(
-            f"💰 Your Points: {user_data['points']}\n"
-            f"👥 Total Referrals: {user_data['referrals']}"
+        
+        message = (
+            "💰 Your Points Summary:\n\n"
+            f"• Total Points: {user_data['points']}\n"
+            f"• Total Referrals: {user_data['referrals']}\n"
+            f"• Rewards Claimed: {user_data.get('rewards_claimed', 0)}\n\n"
+            "🎯 Ways to earn more:\n"
+            "1. Refer friends (+10 points)\n"
+            "2. Daily reward (+5 points)\n"
+            "3. Complete tasks (+15 points)\n\n"
+            "Need 100 points to claim reward! 🎁"
         )
+        
+        await update.message.reply_text(message)
     except Exception as e:
         logger.error(f"Error in my_points: {str(e)}")
         await update.message.reply_text("❌ An error occurred. Please try again.")
@@ -261,7 +286,8 @@ async def claim_reward(update: Update, context: CallbackContext):
         if user_data["points"] < 100:
             await update.message.reply_text(
                 "❌ You need at least 100 points to claim a reward!\n"
-                f"Current points: {user_data['points']}"
+                f"Current points: {user_data['points']}\n"
+                f"Points needed: {100 - user_data['points']}"
             )
             return
 
@@ -284,6 +310,7 @@ async def claim_reward(update: Update, context: CallbackContext):
         users[user_id]["email"] = email
         users[user_id]["awaiting_email"] = False
         users[user_id]["rewards_claimed"] = users[user_id].get("rewards_claimed", 0) + 1
+        users[user_id]["last_reward_claim"] = get_current_time()
         save_data()
 
         user_name = update.effective_user.first_name
@@ -295,7 +322,8 @@ async def claim_reward(update: Update, context: CallbackContext):
             f"User: {user_link}\n"
             f"Email: {email}\n"
             f"Total Claims: {users[user_id]['rewards_claimed']}\n"
-            f"Remaining Points: {users[user_id]['points']}"
+            f"Remaining Points: {users[user_id]['points']}\n"
+            f"Claim Time: {get_current_time()}"
         )
 
         try:
@@ -328,8 +356,9 @@ async def leaderboard(update: Update, context: CallbackContext):
                 name = user.first_name
             except:
                 name = f"User{user_id[:4]}"
-            message += f"{i}. {name}: {data['referrals']} referrals\n"
+            message += f"{i}. {name}: {data['referrals']} referrals ({data['points']} points)\n"
 
+        message += "\n💫 Keep referring to reach the top!"
         await update.message.reply_text(message)
     except Exception as e:
         logger.error(f"Error in leaderboard: {str(e)}")
@@ -373,6 +402,7 @@ async def handle_text(update: Update, context: CallbackContext):
             else:
                 users[user_id]["points"] = users[user_id].get("points", 0) + 15
                 users[user_id]["midas_referral_completed"] = True
+                users[user_id]["midas_completion_time"] = get_current_time()
                 save_data()
                 await update.message.reply_text(
                     "🎉 Congratulations! You've completed the Midas RWA task.\n"
