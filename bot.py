@@ -43,7 +43,7 @@ if not os.path.exists(DATA_DIR):
 async def admin_panel(update: Update, context: CallbackContext):
     try:
         user_id = str(update.effective_user.id)
-        if not await is_admin(user_id):
+        if user_id != str(ADMIN_ID):  # Using your admin ID
             await update.message.reply_text("❌ You are not authorized to use admin commands.")
             return
 
