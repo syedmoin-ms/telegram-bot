@@ -25,6 +25,19 @@ jobs:
     - name: Create data directory
       run: mkdir -p data
     
+    - name: Debug Environment
+      run: |
+        echo "Python version:"
+        python --version
+        echo "Checking for token (safely):"
+        if [ -n "$TELEGRAM_BOT_TOKEN" ]; then
+          echo "Token is set"
+        else
+          echo "Token is NOT set"
+        fi
+      env:
+        TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+    
     - name: Run bot
       env:
         TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
@@ -32,7 +45,7 @@ jobs:
 
     - name: Upload data
       if: always()
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v2  # Changed from v3 to v2
       with:
         name: bot-data
         path: data/
