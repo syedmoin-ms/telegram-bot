@@ -43,9 +43,10 @@ jobs:
         TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
       run: python bot.py
 
-    - name: Upload data
+    # Optional: Save data as artifact
+    - uses: actions/upload-artifact@main
       if: always()
-      uses: actions/upload-artifact@v2  # Changed from v3 to v2
       with:
         name: bot-data
         path: data/
+        retention-days: 1
