@@ -1,3 +1,7 @@
+# At the start of your script
+if not os.path.exists(os.path.dirname(DATA_FILE)):
+    os.makedirs(os.path.dirname(DATA_FILE))
+
 from telegram import Update
 from telegram.ext import (
     Application, CommandHandler, MessageHandler, filters, CallbackContext
