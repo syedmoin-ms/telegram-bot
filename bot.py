@@ -17,6 +17,13 @@ logger = logging.getLogger(__name__)
 
 # Bot Token & Channel Details
 TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
+if not TOKEN:
+    logger.error("No token found in environment variables!")
+    sys.exit(1)
+else:
+    logger.info(f"Token found with length: {len(TOKEN)}")
+    logger.info(f"Token starts with: {TOKEN[:4]}...")
+
 REQUIRED_CHANNELS = ["@fampayearningapp", "@grassnodepayairdrop"]
 CHANNEL_LINKS = {
     "@fampayearningapp": "https://t.me/fampayearningapp",
@@ -33,18 +40,32 @@ if not os.path.exists(DATA_DIR):
     os.makedirs(DATA_DIR)
 
 # Initialize users dictionary
-if os.path.exists(DATA_FILE):
-    try:
-        with open(DATA_FILE, "r") as f:
-            users = json.load(f)
-    except json.JSONDecodeError:
+def load_data():
+    global users
+    if os.path.exists(DATA_FILE):
+        try:
+            with open(DATA_FILE, "r") as f:
+                users = json.load(f)
+        except json.JSONDecodeError:
+            users = {}
+            logger.error("Error reading users file, starting with empty users dict")
+    else:
         users = {}
-        logger.error("Error reading users file, starting with empty users dict")
-else:
-    users = {}
+
+load_data()
 
 def save_data():
     try:
+        # Create backup of existing file
+        if os.path.exists(DATA_FILE):
+            backup_file = f"{DATA_FILE}.backup"
+            try:
+                with open(DATA_FILE, 'r') as src, open(backup_file, 'w') as dst:
+                    dst.write(src.read())
+            except Exception as e:
+                logger.error(f"Error creating backup: {str(e)}")
+
+        # Save new data
         with open(DATA_FILE, "w") as f:
             json.dump(users, f, indent=4)
     except Exception as e:
@@ -55,23 +76,31 @@ def is_valid_email(email):
     return re.match(pattern, email) is not None
 
 async def check_daily_reward(update: Update, context: CallbackContext):
-    user_id = str(update.effective_user.id)
-    today = str(datetime.date.today())
+    try:
+        user_id = str(update.effective_user.id)
+        today = str(datetime.date.today())
 
-    if user_id not in users:
-        return
+        if user_id not in users:
+            users[user_id] = {
+                "points": 0,
+                "referrals": 0,
+                "email": "",
+                "rewards_claimed": 0,
+                "last_daily_claim": "",
+                "awaiting_email": False
+            }
 
-    if "last_daily_claim" not in users[user_id]:
-        users[user_id]["last_daily_claim"] = ""
-
-    if users[user_id]["last_daily_claim"] != today:
-        reward_points = 5
-        users[user_id]["points"] += reward_points
-        users[user_id]["last_daily_claim"] = today
-        save_data()
-        await update.message.reply_text(f"🎁 Daily Reward Claimed!\n+{reward_points} points!")
-    else:
-        await update.message.reply_text("❌ You've already claimed your daily reward today.\nCome back tomorrow!")
+        if users[user_id]["last_daily_claim"] != today:
+            reward_points = 5
+            users[user_id]["points"] = users[user_id].get("points", 0) + reward_points
+            users[user_id]["last_daily_claim"] = today
+            save_data()
+            await update.message.reply_text(f"🎁 Daily Reward Claimed!\n+{reward_points} points!")
+        else:
+            await update.message.reply_text("❌ You've already claimed your daily reward today.\nCome back tomorrow!")
+    except Exception as e:
+        logger.error(f"Error in daily reward: {str(e)}")
+        await update.message.reply_text("❌ An error occurred while claiming daily reward.")
 
 async def check_channel_membership(update: Update, context: CallbackContext) -> bool:
     try:
@@ -103,47 +132,6 @@ async def start(update: Update, context: CallbackContext):
         user_id = str(update.effective_user.id)
         user_name = update.effective_user.first_name
 
-        # Handle referral
-        if context.args and context.args[0]:
-            referrer_id = context.args[0]
-            if referrer_id in users and referrer_id != user_id:
-                if "referral_clicks" not in users[user_id]:
-                    users[user_id]["referral_clicks"] = 1
-                    users[user_id]["referrer_id"] = referrer_id
-                    await update.message.reply_text(
-                        "🔄 First click registered! Please click the referral link again to confirm."
-                    )
-                elif users[user_id]["referral_clicks"] == 1 and users[user_id]["referrer_id"] == referrer_id:
-                    # Give points to new user
-                    users[user_id]["points"] = users[user_id].get("points", 0) + 5
-
-                    # Update referrer's data
-                    if referrer_id not in users:
-                        users[referrer_id] = {"points": 10, "referrals": 1, "email": "", "rewards_claimed": 0}
-                    else:
-                        users[referrer_id]["points"] = users[referrer_id].get("points", 0) + 10
-                        users[referrer_id]["referrals"] = users[referrer_id].get("referrals", 0) + 1
-
-                    save_data()
-
-                    # Send confirmation messages
-                    referrer_name = (await context.bot.get_chat(referrer_id)).first_name
-                    await update.message.reply_text(
-                        f"🎉 Congratulations! You've been referred by {referrer_name}!\n\n"
-                        f"You received: +5 points 🎁\n"
-                        f"Current balance: {users[user_id]['points']} points\n\n"
-                        f"Start earning by sharing your referral link! 🔗"
-                    )
-
-                    await context.bot.send_message(
-                        chat_id=referrer_id,
-                        text=f"🎉 Congratulations! New Referral Success!\n\n"
-                            f"User: {user_name}\n"
-                            f"You received: +10 points 🎁\n"
-                            f"Total referrals: {users[referrer_id]['referrals']}\n"
-                            f"Current balance: {users[referrer_id]['points']} points"
-                    )
-
         # Initialize user data if new
         if user_id not in users:
             users[user_id] = {
@@ -151,9 +139,71 @@ async def start(update: Update, context: CallbackContext):
                 "referrals": 0,
                 "email": "",
                 "rewards_claimed": 0,
-                "awaiting_email": False
+                "awaiting_email": False,
+                "referral_clicks": 0,
+                "referrer_id": None,
+                "last_daily_claim": ""
             }
             save_data()
+
+        # Handle referral
+        if context.args and context.args[0]:
+            referrer_id = str(context.args[0])
+            logger.info(f"Referral attempt - User: {user_id}, Referrer: {referrer_id}")
+            
+            if referrer_id in users and referrer_id != user_id:
+                try:
+                    if "referral_clicks" not in users[user_id]:
+                        users[user_id]["referral_clicks"] = 1
+                        users[user_id]["referrer_id"] = referrer_id
+                        save_data()
+                        await update.message.reply_text(
+                            "🔄 First click registered! Please click the referral link again to confirm."
+                        )
+                    elif users[user_id]["referral_clicks"] == 1 and users[user_id].get("referrer_id") == referrer_id:
+                        users[user_id]["points"] = users[user_id].get("points", 0) + 5
+                        users[user_id]["referral_clicks"] = 2
+
+                        if referrer_id not in users:
+                            users[referrer_id] = {
+                                "points": 10,
+                                "referrals": 1,
+                                "email": "",
+                                "rewards_claimed": 0
+                            }
+                        else:
+                            users[referrer_id]["points"] = users[referrer_id].get("points", 0) + 10
+                            users[referrer_id]["referrals"] = users[referrer_id].get("referrals", 0) + 1
+
+                        save_data()
+
+                        try:
+                            referrer = await context.bot.get_chat(referrer_id)
+                            referrer_name = referrer.first_name
+                        except Exception as e:
+                            logger.error(f"Could not get referrer name: {e}")
+                            referrer_name = "your referrer"
+
+                        await update.message.reply_text(
+                            f"🎉 Congratulations! You've been referred by {referrer_name}!\n\n"
+                            f"You received: +5 points 🎁\n"
+                            f"Current balance: {users[user_id]['points']} points\n\n"
+                            f"Start earning by sharing your referral link! 🔗"
+                        )
+
+                        try:
+                            await context.bot.send_message(
+                                chat_id=referrer_id,
+                                text=f"🎉 Congratulations! New Referral Success!\n\n"
+                                    f"User: {user_name}\n"
+                                    f"You received: +10 points 🎁\n"
+                                    f"Total referrals: {users[referrer_id]['referrals']}\n"
+                                    f"Current balance: {users[referrer_id]['points']} points"
+                            )
+                        except Exception as e:
+                            logger.error(f"Could not send message to referrer: {e}")
+                except Exception as e:
+                    logger.error(f"Error processing referral: {e}")
 
         # Create keyboard with main options
         keyboard = [
@@ -174,7 +224,9 @@ async def start(update: Update, context: CallbackContext):
 
     except Exception as e:
         logger.error(f"Error in start command: {str(e)}")
-        await update.message.reply_text("❌ An error occurred. Please try again.")
+        await update.message.reply_text(
+            "❌ An error occurred. Please try again. If the problem persists, contact support."
+        )
 
 async def refer_earn(update: Update, context: CallbackContext):
     try:
@@ -287,10 +339,16 @@ async def help_command(update: Update, context: CallbackContext):
     try:
         await update.message.reply_text(
             "ℹ️ Bot Help:\n\n"
-            "1. Join our channel\n"
-            "2. Share your referral link\n"
-            "3. Earn points when friends join\n"
-            "4. Claim rewards at 100 points\n\n"
+            "1. Join our channels to start earning\n"
+            "2. Share your referral link with friends\n"
+            "3. Earn points through referrals\n"
+            "4. Claim daily rewards\n"
+            "5. Complete tasks for extra points\n"
+            "6. Claim rewards at 100 points\n\n"
+            "📌 Points System:\n"
+            "• Referral Bonus: +10 points\n"
+            "• Daily Reward: +5 points\n"
+            "• Task Completion: +15 points\n\n"
             "For support: @admin"
         )
     except Exception as e:
@@ -305,6 +363,7 @@ async def handle_text(update: Update, context: CallbackContext):
         # Handle Midas RWA referral verification
         if "MidasRWA_bot/app?startapp=ref_" in text:
             if not users.get(user_id, {}).get("midas_referral_clicked", False):
+                users[user_id] = users.get(user_id, {"points": 0})
                 users[user_id]["midas_referral_clicked"] = True
                 save_data()
                 await update.message.reply_text(
@@ -352,6 +411,11 @@ async def handle_text(update: Update, context: CallbackContext):
             )
             return
 
+        # Handle email input for reward claim
+        if users.get(user_id, {}).get("awaiting_email", False):
+            await claim_reward(update, context)
+            return
+
         # Handle main menu options
         if text == "👥 Refer & Earn":
             await refer_earn(update, context)
@@ -397,7 +461,7 @@ def main():
         app.add_error_handler(error_handler)
 
         # Start the bot
-        print("Starting bot...")
+        logger.info("Starting bot...")
         app.run_polling()
 
     except Exception as e:
